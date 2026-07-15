@@ -338,7 +338,7 @@ export const ApiSettings: React.FC<ApiSettingsProps> = ({ onConfigChange }) => {
             เปิดใช้งานโหมดดึงราคาตลาดจริงแบบฟรี (Free Price Fetching - ไม่หักเงินในบัญชี)
           </label>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginLeft: '1.5rem' }}>
-            * แนะนำให้เปิดไว้! ระบบจะดึงราคาหุ้นและกองทุนจาก Yahoo Finance และ NAV Finnomena โดยตรง ซึ่งฟรี 100% (เก็บยอดเงินเติม 400 บาทของคุณไว้เฉพาะตอนแชทคุยและให้ AI ตรวจพอร์ตเท่านั้น)
+            * แนะนำให้เปิดไว้! ระบบจะดึงราคาหุ้นและกองทุนจาก Yahoo Finance และ NAV Finnomena โดยตรง ซึ่งฟรี 100% (เก็บยอดเงินเติมของคุณไว้เฉพาะตอนแชทคุยและให้ AI ตรวจพอร์ตเท่านั้น)
           </p>
         </div>
 
