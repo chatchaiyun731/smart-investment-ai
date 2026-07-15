@@ -253,7 +253,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
   return (
     <div className="modal-overlay">
-      <div className="modal-content glass" style={{ border: '1px solid rgba(255, 255, 255, 0.15)' }}>
+      <div className="modal-content glass" style={{ border: '1px solid rgba(255, 255, 255, 0.15)', maxHeight: '85vh', overflowY: 'auto' }}>
         <button 
           onClick={onClose} 
           style={{ position: 'absolute', top: '1.25rem', right: '1.25rem', background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}
