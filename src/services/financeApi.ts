@@ -1,5 +1,4 @@
-import fetch from "node-fetch"; // ensure fetch is available
-import { getCache, setCache } from "../cacheManager.js";
+import { getCache, setCache } from "../cacheManager";
 export interface Asset {
   symbol: string;
   name: string;
