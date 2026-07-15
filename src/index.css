@@ -305,6 +305,8 @@ tr:hover td {
 .modal-content {
   width: 100%;
   max-width: 500px;
+  max-height: 90vh; /* Limit height to 90% of viewport height */
+  overflow-y: auto; /* Enable scrollbar inside the modal if it overflows vertically */
   padding: 2rem;
   display: flex;
   flex-direction: column;
