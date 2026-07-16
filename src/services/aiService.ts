@@ -188,11 +188,9 @@ class AiService {
   public async generateAiReport(
     analysis: PortfolioAnalysis, 
     holdings: Holding[], 
-    apiKey: string
+    _apiKey: string
   ): Promise<string> {
-    if (!apiKey) {
-      return this.generateOfflineReport(analysis, holdings);
-    }
+    
 
     const portfolioSummary = holdings.map(h => {
       const asset = financeApi.getAsset(h.symbol);
@@ -255,10 +253,10 @@ ${analysis.assetAllocations.map(a => `- ${a.type === 'stock' ? 'หุ้น' : 
 
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        '/api/gemini',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Gemini-Model': model },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }]
           })
@@ -287,11 +285,9 @@ ${analysis.assetAllocations.map(a => `- ${a.type === 'stock' ? 'หุ้น' : 
   public async generateWeeklyReport(
     analysis: PortfolioAnalysis, 
     holdings: Holding[], 
-    apiKey: string
+    _apiKey: string
   ): Promise<string> {
-    if (!apiKey) {
-      return "> **ฟีเจอร์รายงานสรุปรายสัปดาห์จำเป็นต้องใช้ Gemini API Key**\n\nกรุณาตั้งค่า API Key เพื่อใช้งานฟีเจอร์นี้";
-    }
+    
 
     const portfolioSummary = holdings.map(h => {
       const asset = financeApi.getAsset(h.symbol);
@@ -330,10 +326,10 @@ ${analysis.assetAllocations.map(a => `- ${a.type === 'stock' ? 'หุ้น' : 
 
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        '/api/gemini',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Gemini-Model': model },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }]
           })
@@ -363,12 +359,10 @@ ${analysis.assetAllocations.map(a => `- ${a.type === 'stock' ? 'หุ้น' : 
     messages: ChatMessage[],
     portfolioAnalysis: PortfolioAnalysis,
     holdings: Holding[],
-    apiKey: string,
+    _apiKey: string,
     useSearch: boolean = true
   ): Promise<string> {
-    if (!apiKey) {
-      throw new Error('กรุณากรอก Gemini API Key ในแท็บการตั้งค่าก่อนเริ่มแชท');
-    }
+    
 
     const portfolioSummary = holdings.map(h => {
       const asset = financeApi.getAsset(h.symbol);
@@ -420,10 +414,10 @@ ${portfolioSummary || 'ลูกค้ายังไม่มีสินทร
 
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        '/api/gemini',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Gemini-Model': model },
           body: JSON.stringify(requestBody)
         }
       );
@@ -486,7 +480,7 @@ ${analysis.suggestions.map(s => `- **${s.symbol}** (${s.type === 'stock' ? 'ห�
     scenario: 'war' | 'rate' | 'pandemic' | 'bubble',
     analysis: PortfolioAnalysis,
     holdings: Holding[],
-    apiKey: string
+    _apiKey: string
   ): Promise<string> {
     const portfolioSummary = holdings.map(h => {
       const asset = financeApi.getAsset(h.symbol);
@@ -551,7 +545,7 @@ ${feedbackText}
 หากไม่มี API Key หรือการเรียกใช้งานขัดข้อง ให้ใช้โมเดลวิเคราะห์เชิงคาดการณ์แบบเป็นระบบและสมเหตุสมผลตามหลักการจัดพอร์ตการลงทุนสากล
 `;
 
-    if (!apiKey) {
+    if (!_apiKey) {
       return this.generateOfflineStressTest(scenario, analysis, holdings);
     }
 
@@ -560,10 +554,10 @@ ${feedbackText}
 
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        '/api/gemini',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Gemini-Model': model },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }]
           })
@@ -659,8 +653,8 @@ ${feedbackText}
     return report;
   }
 
-  public async scanHoldings(holdings: Holding[], currentPrices: Record<string, Asset>, apiKey: string): Promise<Record<string, ScanResult>> {
-    if (!apiKey) {
+  public async scanHoldings(holdings: Holding[], currentPrices: Record<string, Asset>, _apiKey: string): Promise<Record<string, ScanResult>> {
+    if (!_apiKey) {
       throw new Error('กรุณาตั้งค่า API Key เพื่อสแกนหาจุดซื้อ/ขาย');
     }
 
@@ -697,10 +691,10 @@ ${portfolioSummary}
 
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        '/api/gemini',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Gemini-Model': model },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: { responseMimeType: 'application/json' }
