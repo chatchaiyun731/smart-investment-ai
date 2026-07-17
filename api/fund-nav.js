@@ -25,6 +25,26 @@ function normalizeSymbol(value) {
 function isSafeSymbol(symbol) {
   return symbol.length > 0 && symbol.length <= 100 && /^[A-Z0-9().+\-_/]+$/.test(symbol);
 }
+function buildFundSymbolCandidates(symbol) {
+  const normalized = normalizeSymbol(symbol);
+  const candidates = new Set([normalized]);
+
+  // กองทุนที่บันทึกชื่อแบบย่อ เช่น K-GOLD-A
+  // ให้ทดลองชนิดสะสมมูลค่าและชนิดจ่ายเงินปันผล
+  if (
+    normalized.endsWith("-A") &&
+    !normalized.endsWith("-A(A)") &&
+    !normalized.endsWith("-A(D)")
+  ) {
+    candidates.add(`${normalized}(A)`);
+    candidates.add(`${normalized}(D)`);
+  }
+
+  // ทดลองชื่อที่ตัดช่องว่าง
+  candidates.add(normalized.replace(/\s+/g, ""));
+
+  return [...candidates].filter(Boolean);
+}
 
 function formatDate(date) {
   return date.toISOString().slice(0, 10);
@@ -176,44 +196,95 @@ async function searchProjectBySymbol(symbol, apiKey) {
   const cached = projectCache.get(symbol);
   if (cached) return cached;
 
-  for (const query of [{ fund_class_name: symbol }, { project_info: symbol }]) {
-    const result = await secFetch("/general-info/profiles", { page_size: PROFILE_PAGE_SIZE, ...query }, apiKey);
-    if (!result.ok) continue;
-    const match = findMatchingProject(extractItems(result.payload), symbol);
-    if (match) {
+  const symbolCandidates = buildFundSymbolCandidates(symbol);
+
+  // ขั้นที่ 1: ค้นด้วยชื่อโดยตรงและชื่อทางเลือก
+  for (const candidate of symbolCandidates) {
+    const searchQueries = [
+      { fund_class_name: candidate },
+      { project_info: candidate },
+    ];
+
+    for (const query of searchQueries) {
+      const result = await secFetch(
+        "/general-info/profiles",
+        {
+          page_size: PROFILE_PAGE_SIZE,
+          ...query,
+        },
+        apiKey
+      );
+
+      if (!result.ok) continue;
+
+      const items = extractItems(result.payload);
+
+      const match =
+        findMatchingProject(items, candidate) ||
+        findMatchingProject(items, symbol);
+
+      if (!match) continue;
+
       const project = {
         projId: getProjId(match),
         uniqueId: getUniqueId(match),
         fundClassName: getFundClassName(match),
+        requestedSymbol: symbol,
+        resolvedSymbol: candidate,
       };
+
       if (project.projId) {
         projectCache.set(symbol, project);
+
+        console.log(
+          `Resolved fund ${symbol} -> ${project.fundClassName} (${project.projId})`
+        );
+
         return project;
       }
     }
   }
 
+  // ขั้นที่ 2: ไล่ค้นข้อมูลทีละหน้า หากการค้นชื่อโดยตรงไม่พบ
   let nextCursor = null;
-  for (let page = 0; page < 20; page += 1) {
+
+  for (let page = 0; page < 30; page += 1) {
     const result = await secFetch(
       "/general-info/profiles",
-      { page_size: PROFILE_PAGE_SIZE, next_cursor: nextCursor },
+      {
+        page_size: PROFILE_PAGE_SIZE,
+        next_cursor: nextCursor,
+      },
       apiKey
     );
+
     if (!result.ok) break;
-    const match = findMatchingProject(extractItems(result.payload), symbol);
+
+    const items = extractItems(result.payload);
+    let match = null;
+
+    for (const candidate of symbolCandidates) {
+      match = findMatchingProject(items, candidate);
+      if (match) break;
+    }
+
     if (match) {
       const project = {
         projId: getProjId(match),
         uniqueId: getUniqueId(match),
         fundClassName: getFundClassName(match),
+        requestedSymbol: symbol,
+        resolvedSymbol: getFundClassName(match),
       };
+
       if (project.projId) {
         projectCache.set(symbol, project);
         return project;
       }
     }
+
     nextCursor = getNextCursor(result.payload);
+
     if (!nextCursor) break;
   }
 
@@ -319,4 +390,5 @@ export default async function handler(req, res) {
   res.setHeader("X-Price-Source", "SEC Open Data");
   return sendJson(res, 200, navResult);
 }
+
 
