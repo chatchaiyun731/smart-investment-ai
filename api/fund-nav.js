@@ -230,9 +230,7 @@ async function fetchLatestNav(project, symbol, apiKey) {
     "/daily-info/nav",
     {
       proj_id: project.projId,
-      nav_date_start: range.start,
-      nav_date_end: range.end,
-    },
+         },
     apiKey
   );
 
