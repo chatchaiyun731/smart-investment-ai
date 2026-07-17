@@ -232,7 +232,6 @@ async function fetchLatestNav(project, symbol, apiKey) {
       proj_id: project.projId,
       nav_date_start: range.start,
       nav_date_end: range.end,
-      page_size: 100,
     },
     apiKey
   );
