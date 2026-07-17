@@ -13,7 +13,7 @@ export const ApiSettings: React.FC<ApiSettingsProps> = ({ onConfigChange }) => {
     secApiKey: '',
     yahooApiKey: '',
     geminiApiKey: '',
-    selectedModel: 'flash',
+    selectedModel: 'gemini-2.5-flash',
     billingTier: 'free',
     useFreePriceMode: true
   });
@@ -28,16 +28,21 @@ export const ApiSettings: React.FC<ApiSettingsProps> = ({ onConfigChange }) => {
   const handleExportBackup = () => {
     const holdings = localStorage.getItem('portfolio_tracker_holdings') || '[]';
     const apiConfig = localStorage.getItem('portfolio_tracker_api_config') || '{}';
+    const parsedApiConfig = JSON.parse(apiConfig);
+    const sanitizedApiConfig = {
+      ...parsedApiConfig,
+      geminiApiKey: ''
+    };
     const chatHistory = localStorage.getItem('portfolio_tracker_chat_history') || '[]';
     const customAssets = localStorage.getItem('portfolio_tracker_custom_assets') || '{}';
 
     const backupData = {
       holdings: JSON.parse(holdings),
-      apiConfig: JSON.parse(apiConfig),
+      apiConfig: sanitizedApiConfig,
       chatHistory: JSON.parse(chatHistory),
       customAssets: JSON.parse(customAssets),
       exportedAt: new Date().toISOString(),
-      version: '1.0.1'
+      version: '1.1.0'
     };
 
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
@@ -81,7 +86,7 @@ export const ApiSettings: React.FC<ApiSettingsProps> = ({ onConfigChange }) => {
             // ล็อกคีย์ API และโหมดจำลองราคาของเครื่องนี้ไว้เสมอ ห้ามนำข้อมูลคีย์เก่าในไฟล์ backup มาทับเด็ดขาด
             const mergedConfig = {
               ...parsed.apiConfig,
-              geminiApiKey: current.geminiApiKey,
+              geminiApiKey: '',
               useMock: current.useMock,
               selectedModel: current.selectedModel,
               billingTier: current.billingTier
@@ -108,14 +113,23 @@ export const ApiSettings: React.FC<ApiSettingsProps> = ({ onConfigChange }) => {
 
   useEffect(() => {
     const loadedConfig = financeApi.getConfig();
-    setConfig(loadedConfig);
+    const sanitizedConfig: ApiConfig = {
+      ...loadedConfig,
+      geminiApiKey: ''
+    };
+
+    setConfig(sanitizedConfig);
+
+    if (loadedConfig.geminiApiKey) {
+      financeApi.saveConfig(sanitizedConfig);
+    }
 
     const presets = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-3.5-flash', 'gemini-3.1-pro', 'gemini-3.1-flash-lite'];
-    if (presets.includes(loadedConfig.selectedModel)) {
+    if (presets.includes(sanitizedConfig.selectedModel)) {
       setIsCustomModel(false);
     } else {
       setIsCustomModel(true);
-      setCustomModelInput(loadedConfig.selectedModel);
+      setCustomModelInput(sanitizedConfig.selectedModel);
     }
 
     const unsubscribeQuota = financeApi.subscribeQuota(() => {
@@ -141,8 +155,9 @@ export const ApiSettings: React.FC<ApiSettingsProps> = ({ onConfigChange }) => {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    const finalConfig = {
+    const finalConfig: ApiConfig = {
       ...config,
+      geminiApiKey: '',
       selectedModel: isCustomModel ? customModelInput.trim() : config.selectedModel
     };
     financeApi.saveConfig(finalConfig);
@@ -164,17 +179,18 @@ export const ApiSettings: React.FC<ApiSettingsProps> = ({ onConfigChange }) => {
           onClick={() => setShowHelp(!showHelp)}
           type="button"
         >
-          <HelpCircle size={14} /> {showHelp ? 'ซ่อนคู่มือ' : 'วิธีขอ API Key'}
+          <HelpCircle size={14} /> {showHelp ? 'ซ่อนข้อมูล' : 'ข้อมูลการเชื่อมต่อ'}
         </button>
       </div>
 
       {showHelp && (
         <div className="glass" style={{ background: 'rgba(139, 92, 246, 0.05)', padding: '1rem', marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.825rem', lineHeight: '1.5' }}>
-          <h4 style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>💡 แหล่งข้อมูลขอ API Key:</h4>
+          <h4 style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>💡 ข้อมูลการเชื่อมต่อ:</h4>
           <p>
-            1. **Gemini AI API Key**: ใช้ประมวลผลคำแนะนำการเงินเชิงลึกและสรุปข้อมูลพอร์ตของคุณเป็นภาษาไทยที่เป็นธรรมชาติ ขอรับคีย์ฟรีได้ที่ 
-            <a href="https://aistudio.google.com/" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)', marginLeft: '4px', textDecoration: 'underline' }}>Google AI Studio</a>
-          </p>
+  	     1. <strong>Gemini AI:</strong> เชื่อมต่อผ่าน Vercel Serverless Function
+                   โดย API Key จัดเก็บใน Environment Variables ฝั่งเซิร์ฟเวอร์
+                  และไม่ถูกส่งมายังเบราว์เซอร์
+                    </p>
           <p>
             2. **SEC Open API (กองทุนรวม)**: เพื่อดึงราคา NAV กองทุนไทยจากสำนักงาน ก.ล.ต. ลงทะเบียนที่ 
             <a href="https://api.sec.or.th/" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)', marginLeft: '4px', textDecoration: 'underline' }}>SEC Open API Portal</a>
@@ -200,8 +216,7 @@ export const ApiSettings: React.FC<ApiSettingsProps> = ({ onConfigChange }) => {
         )}
 
         {/* API Quota Usage Tracker Panel */}
-        {config.geminiApiKey && (
-          <div className="glass" style={{ padding: '1.25rem', background: 'rgba(139, 92, 246, 0.02)', display: 'flex', flexDirection: 'column', gap: '0.75rem', border: '1px solid rgba(139, 92, 246, 0.15)' }}>
+        <div className="glass" style={{ padding: '1.25rem', background: 'rgba(139, 92, 246, 0.02)', display: 'flex', flexDirection: 'column', gap: '0.75rem', border: '1px solid rgba(139, 92, 246, 0.15)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Activity size={16} color="var(--accent-primary)" />
@@ -254,7 +269,6 @@ export const ApiSettings: React.FC<ApiSettingsProps> = ({ onConfigChange }) => {
               * สถานะบัญชี: **{quota.tierName}** {!quota.isPaid ? '(แนะนำใช้รุ่น Gemini 2.5 Flash เพื่อความเสถียรและจำกัดความเร็ว 15 RPM)' : '(โหมดชำระเงิน - ปลดล็อคโควต้าความถี่)'}
             </p>
           </div>
-        )}
 
         {/* Model Selection and Billing Tier */}
         <div className="form-row">
@@ -346,25 +360,36 @@ export const ApiSettings: React.FC<ApiSettingsProps> = ({ onConfigChange }) => {
           <div className="glass" style={{ padding: '1rem', border: '1px solid rgba(245, 158, 11, 0.2)', background: 'rgba(245, 158, 11, 0.03)', display: 'flex', gap: '0.75rem', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
             <AlertTriangle color="var(--accent-gold)" size={20} style={{ flexShrink: 0 }} />
             <div style={{ fontSize: '0.8rem', lineHeight: '1.4' }}>
-              <p style={{ fontWeight: 700, color: 'var(--accent-gold)' }}>ข้อควรระวังเกี่ยวกับการเชื่อมต่อ API จริง:</p>
+              <p style={{ fontWeight: 700, color: 'var(--accent-gold)' }}>ข้อควรระวังเกี่ยวกับ API ข้อมูลราคา:</p>
               <p style={{ color: 'var(--text-secondary)' }}>
-                การเชื่อมต่อ API ราคาหุ้นและกองทุนจริงบนเบราว์เซอร์ฝั่งไคลเอนต์โดยตรง (Client-side) อาจติดเงื่อนไขความปลอดภัย CORS ของผู้ให้บริการ การเรียกใช้ในขั้นโปรดักชันควรเรียกผ่าน Backend Proxy Server
+                SEC และ Yahoo Finance API อาจติดข้อจำกัด CORS หากเรียกจากเบราว์เซอร์โดยตรง
+                ส่วน Gemini AI ถูกย้ายไปเรียกผ่าน Vercel Serverless Function แล้ว
               </p>
             </div>
           </div>
         )}
 
-        <div className="form-group">
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Key size={14} /> Gemini AI API Key (ประมวลรายงานวิเคราะห์พอร์ต)
-          </label>
-          <input 
-            type="password" 
-            className="form-control" 
-            placeholder="ป้อน API Key ของคุณที่นี่ (AI Studio key)..."
-            value={config.geminiApiKey}
-            onChange={(e) => setConfig({ ...config, geminiApiKey: e.target.value })}
-          />
+        <div
+          className="glass"
+          style={{
+            padding: '1rem',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            background: 'rgba(16, 185, 129, 0.08)',
+            display: 'flex',
+            gap: '0.75rem',
+            alignItems: 'flex-start'
+          }}
+        >
+          <CheckCircle color="rgb(52, 211, 153)" size={20} style={{ flexShrink: 0 }} />
+          <div style={{ fontSize: '0.8rem', lineHeight: '1.5' }}>
+            <p style={{ fontWeight: 700, color: 'rgb(110, 231, 183)' }}>
+              Gemini AI เชื่อมต่อผ่าน Backend อย่างปลอดภัย
+            </p>
+            <p style={{ color: 'var(--text-secondary)' }}>
+              Gemini API Key จัดเก็บใน Vercel Environment Variables ฝั่งเซิร์ฟเวอร์
+              และไม่ถูกส่งหรือบันทึกผ่านเบราว์เซอร์
+            </p>
+          </div>
         </div>
 
         <div className="form-group">
@@ -420,7 +445,7 @@ export const ApiSettings: React.FC<ApiSettingsProps> = ({ onConfigChange }) => {
         </div>
         
         <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
-          ข้อมูลพอร์ตการลงทุนและการตั้งค่าของคุณทั้งหมดจะถูกบันทึกไว้ในเบราว์เซอร์เครื่องนี้เท่านั้น คุณสามารถดาวน์โหลดไฟล์สำรองข้อมูล (ไฟล์ JSON) เก็บไว้ในคอมพิวเตอร์ หรือนำไปเก็บต่อใน **Google Drive** ของคุณ เพื่อนำกลับมากู้คืนข้อมูลได้ทุกเมื่อ (เช่น กรณีเปลี่ยนเครื่อง หรืออัปเดตเวอร์ชันแอปแล้วข้อมูลหาย)
+          ข้อมูลพอร์ตการลงทุนและการตั้งค่าจะถูกบันทึกไว้ในเบราว์เซอร์เครื่องนี้ คุณสามารถดาวน์โหลดไฟล์ JSON เพื่อสำรองและกู้คืนภายหลังได้ โดยระบบจะไม่ส่งออก Gemini API Key
         </p>
         
         <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
