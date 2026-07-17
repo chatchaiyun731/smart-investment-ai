@@ -1,4 +1,4 @@
-const SEC_BASE_URL = "https://api.sec.or.th/v2/fund";
+﻿const SEC_BASE_URL = "https://api.sec.or.th/v2/fund";
 const REQUEST_TIMEOUT_MS = 15000;
 const MAX_ATTEMPTS = 3;
 const PROFILE_PAGE_SIZE = 100;
@@ -229,8 +229,12 @@ async function fetchLatestNav(project, symbol, apiKey) {
   const result = await secFetch(
     "/daily-info/nav",
     {
+      page_size: 100,
       proj_id: project.projId,
-         },
+      start_nav_date: range.start,
+      end_nav_date: range.end,
+      fund_class_name: project.fundClassName || symbol,
+    },
     apiKey
   );
 
@@ -315,3 +319,4 @@ export default async function handler(req, res) {
   res.setHeader("X-Price-Source", "SEC Open Data");
   return sendJson(res, 200, navResult);
 }
+
