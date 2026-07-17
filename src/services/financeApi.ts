@@ -162,7 +162,7 @@ class FinanceApiService {
       }
       if (result) {
         // Store in cache (default TTL 5 min)
-        await setCache(cacheKey, result, 24 * 60 * 60 * 1000); // 24 hours (1 day)
+        await setCache(cacheKey, result, 15 * 60 * 1000); // 15 minutes
         return result;
       }
     } catch (e) {
@@ -318,31 +318,54 @@ class FinanceApiService {
     }
   }
 
-  // Fetch real NAV prices from Finnomena via AllOrigins CORS proxy
-  private async fetchFinnomenaFundNav(symbol: string): Promise<{ price: number; prevClose: number } | null> {
+  // Fetch real NAV prices through our Vercel backend.
+  // This avoids browser CORS restrictions and unreliable public CORS proxies.
+  private async fetchFinnomenaFundNav(
+    symbol: string
+  ): Promise<{ price: number; prevClose: number; navDate?: string } | null> {
     const sym = symbol.toUpperCase().trim();
+    if (!sym) return null;
+
     try {
-      const url = `https://api.finnomena.com/fund/api/v1/fund/detail/NAV?symbol=${sym}`;
-      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-      
-      const response = await fetch(proxyUrl);
-      if (!response.ok) return null;
-      
-      const data = await response.json();
-      const rawJson = JSON.parse(data.contents);
-      if (Array.isArray(rawJson) && rawJson.length > 0) {
-        const latest = rawJson[rawJson.length - 1];
-        const previous = rawJson.length > 1 ? rawJson[rawJson.length - 2] : latest;
-        
-        const price = Number(latest.nav);
-        const prevClose = Number(previous.nav);
-        if (!isNaN(price) && !isNaN(prevClose)) {
-          return { price, prevClose };
+      const response = await fetch(
+        `/api/fund-nav?symbol=${encodeURIComponent(sym)}`,
+        {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          cache: 'no-store'
         }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn(
+          `Fund NAV backend returned ${response.status} for ${sym}:`,
+          errorText
+        );
+        return null;
       }
-      return null;
-    } catch (e) {
-      console.error(`Failed to fetch Finnomena NAV for ${symbol}`, e);
+
+      const data = await response.json();
+      const price = Number(data.price);
+      const prevClose = Number(data.prevClose);
+
+      if (
+        !Number.isFinite(price) ||
+        price <= 0 ||
+        !Number.isFinite(prevClose) ||
+        prevClose <= 0
+      ) {
+        console.warn(`Invalid NAV response for ${sym}:`, data);
+        return null;
+      }
+
+      return {
+        price,
+        prevClose,
+        navDate: typeof data.navDate === 'string' ? data.navDate : undefined
+      };
+    } catch (error) {
+      console.error(`Failed to fetch NAV through backend for ${sym}`, error);
       return null;
     }
   }
@@ -420,8 +443,7 @@ class FinanceApiService {
     });
 
     const prompt = `You are a real-time financial price lookup assistant. Use Google Search to find the current stock prices (last close or regular market price) for stocks, and the latest NAV prices (Net Asset Value) for mutual funds, along with their previous day's closing/NAV prices.
-The list of STOCKS to look up is: ${stockSymbols.join(', ')}. (For Thai stocks, search on the Stock Exchange of Thailand, and fimport { getCache, setCache } from "../cacheManager.js";
-import fetch from "node-fetch"; // ensure fetch is available).
+The list of STOCKS to look up is: ${stockSymbols.join(', ')}. (For Thai stocks, search on the Stock Exchange of Thailand.)
 The list of MUTUAL FUNDS to look up is: ${fundSymbols.join(', ')}. (For Thai mutual funds, search specifically for their latest NAV prices on finnomena.com by typing e.g. "SYMBOL site:finnomena.com/fund". This is critical to get the correct NAV value, e.g. around 7.38 for KFGG-A, instead of looking up other share classes or outdated info).
 Reply ONLY with a valid JSON object matching this schema: { "TICKER": { "price": number, "prevClose": number } }. 
 Do not include any markdown formatting, backticks, or explanatory text - return ONLY the raw JSON string. 

@@ -49,6 +49,21 @@ const RECOMMENDATION_ITEMS: { symbol: string; name: string; type: 'stock' | 'fun
   { symbol: 'SCBGP', name: 'SCB Global Population Fund', type: 'fund', reason: 'เน้นกลุ่มอุปโภคบริโภคและการดูแลสุขภาพทั่วโลก มีความผันผวนต่ำกว่าหุ้นเทคโนโลยี' }
 ];
 
+
+const MAX_CHAT_HISTORY_MESSAGES = 6;
+const MAX_USER_MESSAGE_CHARS = 2_500;
+const MAX_MODEL_MESSAGE_CHARS = 1_200;
+const MAX_FEEDBACK_ITEMS = 10;
+
+function truncateText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}\n[ตัดข้อความส่วนเกินเพื่อลดการใช้โทเคน]`;
+}
+
+function roundNumber(value: number, digits = 2): number {
+  return Number(value.toFixed(digits));
+}
+
 class AiService {
   
   public analyzePortfolio(holdings: Holding[], currentPrices: Record<string, Asset>): PortfolioAnalysis {
@@ -131,7 +146,7 @@ class AiService {
     // Generate Warnings
     const warnings: string[] = [];
     if (holdings.length > 0) {
-      if (assetTypeMap.stock / totalValue > 0.85) {
+      if (totalValue > 0 && assetTypeMap.stock / totalValue > 0.85) {
         warnings.push('พอร์ตของคุณมีสัดส่วนหุ้นสูงมาก (>85%) ซึ่งมีความผันผวนสูงมาก ควรเพิ่มกองทุนรวมตราสารหนี้หรือกองทุนรวมต่างประเทศเพื่อลดความเสี่ยง');
       }
       if (sectorAllocations.length > 0 && sectorAllocations[0].percentage > 50) {
@@ -188,17 +203,16 @@ class AiService {
   public async generateAiReport(
     analysis: PortfolioAnalysis, 
     holdings: Holding[], 
-    apiKey: string
+    _apiKey: string
   ): Promise<string> {
-    if (!apiKey) {
-      return this.generateOfflineReport(analysis, holdings);
-    }
+    
 
     const portfolioSummary = holdings.map(h => {
       const asset = financeApi.getAsset(h.symbol);
       const currentPrice = asset ? asset.price : h.avgCost;
       const profitLoss = (currentPrice - h.avgCost) * h.quantity;
-      const profitLossPercent = (profitLoss / (h.avgCost * h.quantity)) * 100;
+      const investedCost = h.avgCost * h.quantity;
+      const profitLossPercent = investedCost > 0 ? (profitLoss / investedCost) * 100 : 0;
       return `- ${h.symbol} (${asset?.type === 'stock' ? 'หุ้น' : 'กองทุนรวม'}): ซื้อเฉลี่ย ${h.avgCost}, ราคาปัจจุบัน ${currentPrice}, จำนวน ${h.quantity} หน่วย, มูลค่าปัจจุบัน ${(h.quantity * currentPrice).toLocaleString()} บาท, กำไร/ขาดทุน ${profitLoss.toLocaleString()} บาท (${profitLossPercent.toFixed(2)}%)`;
     }).join('\n');
 
@@ -208,8 +222,12 @@ class AiService {
       const savedFeedback = localStorage.getItem('portfolio_tracker_feedback');
       if (savedFeedback) {
         const feedbackMap = JSON.parse(savedFeedback);
-        const likes = Object.keys(feedbackMap).filter(k => feedbackMap[k] === 'like');
-        const dislikes = Object.keys(feedbackMap).filter(k => feedbackMap[k] === 'dislike');
+        const likes = Object.keys(feedbackMap)
+          .filter(k => feedbackMap[k] === 'like')
+          .slice(0, MAX_FEEDBACK_ITEMS);
+        const dislikes = Object.keys(feedbackMap)
+          .filter(k => feedbackMap[k] === 'dislike')
+          .slice(0, MAX_FEEDBACK_ITEMS);
         if (likes.length > 0 || dislikes.length > 0) {
           feedbackText = `\nประวัติสไตล์การลงทุนที่ผู้ใช้เคยให้ข้อเสนอแนะไว้ (Feedback Loop):\n`;
           if (likes.length > 0) feedbackText += `- สินทรัพย์แนะนำที่ผู้ใช้สนใจ/ชอบสไตล์นี้: ${likes.join(', ')}\n`;
@@ -251,16 +269,20 @@ ${analysis.assetAllocations.map(a => `- ${a.type === 'stock' ? 'หุ้น' : 
 `;
 
     const config = financeApi.getConfig();
-    const model = (config.selectedModel || 'gemini-3.5-flash').trim();
+    const model = (config.selectedModel || 'gemini-3.1-flash-lite').trim();
 
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        '/api/gemini',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Gemini-Model': model },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.35,
+              maxOutputTokens: 1_400
+            }
           })
         }
       );
@@ -287,17 +309,16 @@ ${analysis.assetAllocations.map(a => `- ${a.type === 'stock' ? 'หุ้น' : 
   public async generateWeeklyReport(
     analysis: PortfolioAnalysis, 
     holdings: Holding[], 
-    apiKey: string
+    _apiKey: string
   ): Promise<string> {
-    if (!apiKey) {
-      return "> **ฟีเจอร์รายงานสรุปรายสัปดาห์จำเป็นต้องใช้ Gemini API Key**\n\nกรุณาตั้งค่า API Key เพื่อใช้งานฟีเจอร์นี้";
-    }
+    
 
     const portfolioSummary = holdings.map(h => {
       const asset = financeApi.getAsset(h.symbol);
       const currentPrice = asset ? asset.price : h.avgCost;
       const profitLoss = (currentPrice - h.avgCost) * h.quantity;
-      const profitLossPercent = (profitLoss / (h.avgCost * h.quantity)) * 100;
+      const investedCost = h.avgCost * h.quantity;
+      const profitLossPercent = investedCost > 0 ? (profitLoss / investedCost) * 100 : 0;
       return `- ${h.symbol} (${asset?.type === 'stock' ? 'หุ้น' : 'กองทุนรวม'}): ต้นทุน ฿${h.avgCost}, ปัจจุบัน ฿${currentPrice}, ถือ ${h.quantity} หน่วย, มูลค่า ฿${(h.quantity * currentPrice).toLocaleString()}, กำไร/ขาดทุน ฿${profitLoss.toLocaleString()} (${profitLossPercent.toFixed(2)}%)`;
     }).join('\n');
 
@@ -326,16 +347,20 @@ ${analysis.assetAllocations.map(a => `- ${a.type === 'stock' ? 'หุ้น' : 
 `;
 
     const config = financeApi.getConfig();
-    const model = (config.selectedModel || 'gemini-3.5-flash').trim();
+    const model = (config.selectedModel || 'gemini-3.1-flash-lite').trim();
 
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        '/api/gemini',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Gemini-Model': model },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.35,
+              maxOutputTokens: 1_400
+            }
           })
         }
       );
@@ -353,9 +378,10 @@ ${analysis.assetAllocations.map(a => `- ${a.type === 'stock' ? 'หุ้น' : 
       }
       financeApi.incrementApiUsage();
       return report;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to generate Weekly Gemini AI report', error);
-      return `> **ระบบขัดข้องในการเชื่อมต่อ Gemini API**\n\n` + error;
+      const message = error instanceof Error ? error.message : 'ไม่ทราบสาเหตุ';
+      return `> **ระบบขัดข้องในการเชื่อมต่อ Gemini API**\n\n${message}`;
     }
   }
 
@@ -363,74 +389,148 @@ ${analysis.assetAllocations.map(a => `- ${a.type === 'stock' ? 'หุ้น' : 
     messages: ChatMessage[],
     portfolioAnalysis: PortfolioAnalysis,
     holdings: Holding[],
-    apiKey: string,
+    _apiKey: string,
     useSearch: boolean = true
   ): Promise<string> {
-    if (!apiKey) {
-      throw new Error('กรุณากรอก Gemini API Key ในแท็บการตั้งค่าก่อนเริ่มแชท');
-    }
-
-    const portfolioSummary = holdings.map(h => {
+    const compactHoldings = holdings.map(h => {
       const asset = financeApi.getAsset(h.symbol);
-      const currentPrice = asset ? asset.price : h.avgCost;
-      return `- ${h.symbol} (${asset?.type === 'stock' ? 'หุ้น' : 'กองทุนรวม'}): ซื้อเฉลี่ย ฿${h.avgCost}, ราคาปัจจุบัน ฿${currentPrice}, ถือ ${h.quantity} หน่วย, มูลค่าปัจจุบัน ฿${(h.quantity * currentPrice).toLocaleString()}`;
-    }).join('\n');
+      const currentPrice = asset?.price ?? h.avgCost;
+      const currentValue = h.quantity * currentPrice;
+      const investedCost = h.quantity * h.avgCost;
+      const gainLossPercent = investedCost > 0
+        ? ((currentValue - investedCost) / investedCost) * 100
+        : 0;
+
+      return {
+        symbol: h.symbol.toUpperCase(),
+        type: asset?.type === 'stock' ? 'หุ้น' : 'กองทุนรวม',
+        quantity: roundNumber(h.quantity, 4),
+        avgCost: roundNumber(h.avgCost),
+        currentPrice: roundNumber(currentPrice),
+        value: Math.round(currentValue),
+        gainLossPercent: roundNumber(gainLossPercent)
+      };
+    });
+
+    const compactAnalysis = {
+      totalValue: Math.round(portfolioAnalysis.totalValue),
+      totalCost: Math.round(portfolioAnalysis.totalCost),
+      totalGainLoss: Math.round(portfolioAnalysis.totalGainLoss),
+      totalGainLossPercent: roundNumber(portfolioAnalysis.totalGainLossPercent),
+      riskScore: portfolioAnalysis.riskScore,
+      riskLevel: portfolioAnalysis.riskLevel,
+      diversificationScore: portfolioAnalysis.diversificationScore,
+      topSectors: portfolioAnalysis.sectorAllocations
+        .slice(0, 5)
+        .map(item => ({
+          sector: item.sector,
+          percentage: roundNumber(item.percentage)
+        })),
+      assetAllocations: portfolioAnalysis.assetAllocations.map(item => ({
+        type: item.type,
+        percentage: roundNumber(item.percentage)
+      })),
+      warnings: portfolioAnalysis.warnings.slice(0, 5)
+    };
 
     const systemInstructionText = `
-คุณคือ SmartInvest AI Chatbot ผู้เชี่ยวชาญด้านการเงินและการลงทุนที่น่าเชื่อถือ เป็นมิตร และให้ข้อมูลอย่างรอบด้านแก่ผู้ใช้งาน 
+คุณคือ SmartInvest AI Chatbot ผู้ช่วยวิเคราะห์การลงทุนภาษาไทย
 
-ข้อมูลพอร์ตโฟลิโอปัจจุบันของลูกค้า:
-- มูลค่าพอร์ตรวม: ฿${portfolioAnalysis.totalValue.toLocaleString()}
-- ต้นทุนรวม: ฿${portfolioAnalysis.totalCost.toLocaleString()}
-- กำไร/ขาดทุนรวม: ฿${portfolioAnalysis.totalGainLoss.toLocaleString()} (${portfolioAnalysis.totalGainLossPercent.toFixed(2)}%)
-- ความเสี่ยงพอร์ต: ระดับ "${portfolioAnalysis.riskLevel}" (คะแนน: ${portfolioAnalysis.riskScore}/100)
-- คะแนนการกระจายความเสี่ยง: ${portfolioAnalysis.diversificationScore}/100
-
-รายการสินทรัพย์ที่ลูกค้าถือครอง:
-${portfolioSummary || 'ลูกค้ายังไม่มีสินทรัพย์ในพอร์ต'}
-
-คำแนะนำการตอบแชท:
-1. ตอบคำถามของลูกค้าด้วยความสุภาพ น่าเชื่อถือ และใช้ภาษาไทยที่อ่านง่าย เป็นมิตร
-2. หากเปิดใช้ Google Search Grounding (ค้นหาข้อมูลสด): คุณสามารถสืบค้นข่าวสาร ข้อมูลเศรษฐกิจ ดัชนีหุ้น หรืออัตราดอกเบี้ยปัจจุบันเพื่อตอบคำถามลูกค้าแบบเรียลไทม์ได้
-3. หลีกเลี่ยงการแนะนำให้ซื้อ/ขายสินทรัพย์ตรงๆ ในลักษณะชี้นำการลงทุนโดยไม่มีข้อมูลรองรับ ให้แสดงวิเคราะห์เป็นแนวทาง โอกาส และความเสี่ยงประกอบการตัดสินใจเสมอตามหลักการบริหารสินทรัพย์ที่ดี
-4. ถ้าลูกค้าถามเกี่ยวกับพอร์ต ให้ใช้ข้อมูลพอร์ตข้างต้นตอบและวิเคราะห์ เช่น การปรับสมดุลพอร์ต
+หลักการตอบ:
+- ตอบกระชับ ชัดเจน เป็นมิตร และอธิบายทั้งโอกาสกับความเสี่ยง
+- ใช้ข้อมูลพอร์ตที่แนบมากับคำถามล่าสุดเมื่อคำถามเกี่ยวข้องกับพอร์ต
+- อย่าสร้างราคาหรือข่าวปัจจุบันขึ้นเอง หากไม่มีข้อมูลสดให้บอกข้อจำกัด
+- หลีกเลี่ยงคำสั่งซื้อหรือขายแบบฟันธง ให้เสนอทางเลือกและเงื่อนไขประกอบ
+- หากเปิด Google Search Grounding ให้ใช้เฉพาะเมื่อคำถามต้องการข้อมูลปัจจุบัน
 `;
 
-    // Map message history to Gemini API format
-    const contents = messages.map(msg => ({
-      role: msg.role === 'model' ? 'model' : 'user',
-      parts: [{ text: msg.text }]
+    // ตัดข้อความต้อนรับและส่งเฉพาะประวัติล่าสุด เพื่อลด prompt token
+    const recentMessages = messages
+      .filter((message, index) => {
+        const isWelcomeMessage =
+          index === 0 &&
+          message.role === 'model' &&
+          message.text.includes('SmartInvest AI Chatbot');
+        return !isWelcomeMessage;
+      })
+      .slice(-MAX_CHAT_HISTORY_MESSAGES);
+
+    const latestMessage = recentMessages.at(-1);
+    if (!latestMessage || latestMessage.role !== 'user') {
+      throw new Error('ไม่พบคำถามล่าสุดของผู้ใช้');
+    }
+
+    const historyContents = recentMessages.slice(0, -1).map(message => ({
+      role: message.role,
+      parts: [{
+        text: truncateText(
+          message.text,
+          message.role === 'model'
+            ? MAX_MODEL_MESSAGE_CHARS
+            : MAX_USER_MESSAGE_CHARS
+        )
+      }]
     }));
 
-    const config = financeApi.getConfig();
-    const model = (config.selectedModel || 'gemini-3.5-flash').trim();
+    const portfolioContext = `
+ข้อมูลพอร์ตแบบย่อ:
+${JSON.stringify(compactAnalysis)}
 
-    const requestBody: any = {
+สินทรัพย์ที่ถือ:
+${JSON.stringify(compactHoldings)}
+`;
+
+    const contents = [
+      ...historyContents,
+      {
+        role: 'user' as const,
+        parts: [{
+          text: `${portfolioContext}\nคำถามล่าสุด:\n${truncateText(latestMessage.text, MAX_USER_MESSAGE_CHARS)}`
+        }]
+      }
+    ];
+
+    const config = financeApi.getConfig();
+    const model = (config.selectedModel || 'gemini-3.1-flash-lite').trim();
+
+    const requestBody: {
+      contents: typeof contents;
+      systemInstruction: { parts: { text: string }[] };
+      generationConfig: {
+        temperature: number;
+        maxOutputTokens: number;
+      };
+      tools?: { googleSearch: Record<string, never> }[];
+    } = {
       contents,
       systemInstruction: {
         parts: [{ text: systemInstructionText }]
+      },
+      generationConfig: {
+        temperature: 0.35,
+        maxOutputTokens: 1_200
       }
     };
 
     if (useSearch) {
-      requestBody.tools = [{
-        googleSearch: {}
-      }];
+      requestBody.tools = [{ googleSearch: {} }];
     }
 
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody)
-        }
-      );
+      const response = await fetch('/api/gemini', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Gemini-Model': model
+        },
+        body: JSON.stringify(requestBody)
+      });
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Gemini API Error ${response.status}: ${errorText} (Model: ${model})`);
+        throw new Error(
+          `Gemini API Error ${response.status}: ${errorText} (Model: ${model})`
+        );
       }
 
       const data = await response.json();
@@ -439,11 +539,15 @@ ${portfolioSummary || 'ลูกค้ายังไม่มีสินทร
       if (!answer) {
         throw new Error('No answer text returned from Gemini API');
       }
+
       financeApi.incrementApiUsage();
       return answer;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to chat with Gemini', error);
-      throw new Error(error.message || 'การเชื่อมต่อกับ AI ขัดข้อง กรุณาลองใหม่อีกครั้ง');
+      const message = error instanceof Error ? error.message : '';
+      throw new Error(
+        message || 'การเชื่อมต่อกับ AI ขัดข้อง กรุณาลองใหม่อีกครั้ง'
+      );
     }
   }
 
@@ -486,7 +590,7 @@ ${analysis.suggestions.map(s => `- **${s.symbol}** (${s.type === 'stock' ? 'ห�
     scenario: 'war' | 'rate' | 'pandemic' | 'bubble',
     analysis: PortfolioAnalysis,
     holdings: Holding[],
-    apiKey: string
+    _apiKey: string
   ): Promise<string> {
     const portfolioSummary = holdings.map(h => {
       const asset = financeApi.getAsset(h.symbol);
@@ -516,8 +620,12 @@ ${analysis.suggestions.map(s => `- **${s.symbol}** (${s.type === 'stock' ? 'ห�
       const savedFeedback = localStorage.getItem('portfolio_tracker_feedback');
       if (savedFeedback) {
         const feedbackMap = JSON.parse(savedFeedback);
-        const likes = Object.keys(feedbackMap).filter(k => feedbackMap[k] === 'like');
-        const dislikes = Object.keys(feedbackMap).filter(k => feedbackMap[k] === 'dislike');
+        const likes = Object.keys(feedbackMap)
+          .filter(k => feedbackMap[k] === 'like')
+          .slice(0, MAX_FEEDBACK_ITEMS);
+        const dislikes = Object.keys(feedbackMap)
+          .filter(k => feedbackMap[k] === 'dislike')
+          .slice(0, MAX_FEEDBACK_ITEMS);
         if (likes.length > 0 || dislikes.length > 0) {
           feedbackText = `\nประวัติสไตล์การลงทุนที่ผู้ใช้เคยให้ข้อเสนอแนะไว้ (Feedback Loop):\n`;
           if (likes.length > 0) feedbackText += `- สินทรัพย์แนะนำที่ผู้ใช้สนใจ/ชอบสไตล์นี้: ${likes.join(', ')}\n`;
@@ -551,21 +659,22 @@ ${feedbackText}
 หากไม่มี API Key หรือการเรียกใช้งานขัดข้อง ให้ใช้โมเดลวิเคราะห์เชิงคาดการณ์แบบเป็นระบบและสมเหตุสมผลตามหลักการจัดพอร์ตการลงทุนสากล
 `;
 
-    if (!apiKey) {
-      return this.generateOfflineStressTest(scenario, analysis, holdings);
-    }
 
     const config = financeApi.getConfig();
-    const model = config.selectedModel || 'gemini-3.5-flash';
+    const model = config.selectedModel || 'gemini-3.1-flash-lite';
 
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        '/api/gemini',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Gemini-Model': model },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.35,
+              maxOutputTokens: 1_400
+            }
           })
         }
       );
@@ -659,16 +768,13 @@ ${feedbackText}
     return report;
   }
 
-  public async scanHoldings(holdings: Holding[], currentPrices: Record<string, Asset>, apiKey: string): Promise<Record<string, ScanResult>> {
-    if (!apiKey) {
-      throw new Error('กรุณาตั้งค่า API Key เพื่อสแกนหาจุดซื้อ/ขาย');
-    }
-
+  public async scanHoldings(holdings: Holding[], currentPrices: Record<string, Asset>, _apiKey: string): Promise<Record<string, ScanResult>> {
     const portfolioSummary = holdings.map(h => {
       const asset = currentPrices[h.symbol.toUpperCase()];
       const currentPrice = asset ? asset.price : h.avgCost;
       const profitLoss = (currentPrice - h.avgCost) * h.quantity;
-      const profitLossPercent = (profitLoss / (h.avgCost * h.quantity)) * 100;
+      const investedCost = h.avgCost * h.quantity;
+      const profitLossPercent = investedCost > 0 ? (profitLoss / investedCost) * 100 : 0;
       return `- ${h.symbol.toUpperCase()}: ต้นทุน ฿${h.avgCost}, ปัจจุบัน ฿${currentPrice}, กำไร/ขาดทุน ${profitLossPercent.toFixed(2)}%`;
     }).join('\n');
 
@@ -697,13 +803,17 @@ ${portfolioSummary}
 
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        '/api/gemini',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Gemini-Model': model },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { responseMimeType: 'application/json' }
+            generationConfig: {
+              responseMimeType: 'application/json',
+              temperature: 0.2,
+              maxOutputTokens: 1_000
+            }
           })
         }
       );
@@ -717,9 +827,10 @@ ${portfolioSummary}
       
       financeApi.incrementApiUsage();
       return JSON.parse(answer);
-    } catch (e: any) {
-      console.error('Scan Error:', e);
-      throw new Error(e.message || 'สแกนล้มเหลว');
+    } catch (error: unknown) {
+      console.error('Scan Error:', error);
+      const message = error instanceof Error ? error.message : '';
+      throw new Error(message || 'สแกนล้มเหลว');
     }
   }
 }
