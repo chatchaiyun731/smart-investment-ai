@@ -25,14 +25,14 @@ const ChatMarkdown: React.FC<{ text: string }> = ({ text }) => {
           return <h3 key={idx} style={{ fontSize: '1rem', fontWeight: 800, marginTop: '0.5rem', color: 'var(--accent-primary)' }}>{trimmed.slice(3)}</h3>;
         }
         if (trimmed.startsWith('- ')) {
-          return (
+         return (
             <li key={idx} style={{ marginLeft: '1rem', color: 'var(--text-secondary)' }}>
               {parseBoldText(trimmed.slice(2))}
             </li>
           );
         }
         if (trimmed.startsWith('> ')) {
-          return (
+         return (
             <blockquote key={idx} style={{ borderLeft: '3px solid var(--accent-primary)', paddingLeft: '0.5rem', color: 'var(--text-muted)', fontStyle: 'italic', margin: '0.25rem 0' }}>
               {trimmed.slice(2)}
             </blockquote>
@@ -55,22 +55,18 @@ const parseBoldText = (text: string) => {
   });
 };
 
-export const AiChat: React.FC<AiChatProps> = ({ analysis, holdings, setActiveTab }) => {
+export const AiChat: React.FC<AiChatProps> = ({ analysis, holdings, setActiveTab: _setActiveTab }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(false);
-  const [apiKey, setApiKey] = useState('');
   const [quota, setQuota] = useState(financeApi.getApiUsage());
   const [errorMsg, setErrorMsg] = useState('');
   const [useSearch, setUseSearch] = useState<boolean>(true);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Initialize chat history and check API key
+  // Initialize chat history
   useEffect(() => {
-    const config = financeApi.getConfig();
-    setApiKey(config.geminiApiKey);
-
     const savedChat = localStorage.getItem('portfolio_tracker_chat_history');
     if (savedChat) {
       try {
@@ -87,7 +83,7 @@ export const AiChat: React.FC<AiChatProps> = ({ analysis, holdings, setActiveTab
       setQuota(financeApi.getApiUsage());
     });
 
-    return () => {
+   return () => {
       unsubscribeQuota();
     };
   }, []);
@@ -121,12 +117,6 @@ export const AiChat: React.FC<AiChatProps> = ({ analysis, holdings, setActiveTab
     if (!textToSend.trim() || loading) return;
     setErrorMsg('');
 
-    const config = financeApi.getConfig();
-    if (!config.geminiApiKey) {
-      setErrorMsg('กรุณากรอก Gemini API Key ในแท็บการตั้งค่าการเชื่อมต่อก่อนเริ่มพิมพ์แชท');
-      return;
-    }
-
     const newUserMsg: ChatMessage = { role: 'user', text: textToSend.trim() };
     const updatedMessages = [...messages, newUserMsg];
     
@@ -140,15 +130,16 @@ export const AiChat: React.FC<AiChatProps> = ({ analysis, holdings, setActiveTab
         updatedMessages,
         analysis,
         holdings,
-        config.geminiApiKey,
+        '',
         useSearch
       );
       
       const newAiMsg: ChatMessage = { role: 'model', text: answer };
       saveChatHistory([...updatedMessages, newAiMsg]);
-    } catch (e: any) {
-      console.error(e);
-      setErrorMsg(e.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลจาก AI กรุณาลองอีกครั้ง');
+    } catch (error: unknown) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : '';
+      setErrorMsg(message || 'เกิดข้อผิดพลาดในการดึงข้อมูลจาก AI กรุณาลองอีกครั้ง');
       // Revert to history without the last message if failed or just keep it
     } finally {
       setLoading(false);
@@ -166,25 +157,6 @@ export const AiChat: React.FC<AiChatProps> = ({ analysis, holdings, setActiveTab
   const handleQuickQuestion = (question: string) => {
     handleSend(question);
   };
-
-  if (!apiKey) {
-    return (
-      <div className="glass" style={{ padding: '3rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem' }}>
-        <div style={{ background: 'var(--accent-red-glow)', padding: '1rem', borderRadius: '50%', color: 'var(--accent-red)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <AlertCircle size={32} />
-        </div>
-        <div>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: '0.5rem' }}>ยังไม่ได้เปิดใช้งานกล่องแชท AI</h3>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', maxWidth: '500px', lineHeight: '1.5', margin: '0 auto' }}>
-            ฟีเจอร์กล่องแชทโต้ตอบเรียลไทม์จำเป็นต้องใช้ **Gemini AI API Key** เพื่อประมวลคำตอบ กรุณาไปเปิดใช้งานฟรีได้ที่หน้าตั้งค่าระบบ
-          </p>
-        </div>
-        <button className="btn btn-primary" onClick={() => setActiveTab('settings')}>
-          ไปตั้งค่าเชื่อมต่อ API
-        </button>
-      </div>
-    );
-  }
 
   return (
     <div className="glass" style={{ height: '600px', display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
@@ -217,7 +189,7 @@ export const AiChat: React.FC<AiChatProps> = ({ analysis, holdings, setActiveTab
       <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
         {messages.map((msg, i) => {
           const isAi = msg.role === 'model';
-          return (
+         return (
             <div 
               key={i} 
               style={{ 
